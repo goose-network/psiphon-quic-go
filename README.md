@@ -1,52 +1,52 @@
-# A QUIC implementation in pure Go
+# psiphon-quic-go
 
-<img src="docs/quic.png" width=303 height=124>
+Fork of [`github.com/Psiphon-Labs/quic-go`](https://github.com/Psiphon-Labs/quic-go)
+at `v0.0.0-20250527153145-79fe45fb83b1`, with one change: the `http3`
+package is ported from the qpack **v0.4.0** decoder API
+(`NewDecoder(emitFunc)` + `DecodeFull([]byte)`) to the **v0.6.0** API
+(`NewDecoder()` + `Decode([]byte) DecodeFunc` iterator).
 
-[![Documentation](https://img.shields.io/badge/docs-quic--go.net-red?style=flat)](https://quic-go.net/docs/)
-[![PkgGoDev](https://pkg.go.dev/badge/github.com/quic-go/quic-go)](https://pkg.go.dev/github.com/quic-go/quic-go)
-[![Code Coverage](https://img.shields.io/codecov/c/github/quic-go/quic-go/master.svg?style=flat-square)](https://codecov.io/gh/quic-go/quic-go/)
-[![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/quic-go.svg)](https://bugs.chromium.org/p/oss-fuzz/issues/list?sort=-opened&can=1&q=proj:quic-go)
+The module path stays `github.com/Psiphon-Labs/quic-go`, so consumers swap
+upstream for this fork with a single versioned `replace` directive:
 
-quic-go is an implementation of the QUIC protocol ([RFC 9000](https://datatracker.ietf.org/doc/html/rfc9000), [RFC 9001](https://datatracker.ietf.org/doc/html/rfc9001), [RFC 9002](https://datatracker.ietf.org/doc/html/rfc9002)) in Go. It has support for HTTP/3 ([RFC 9114](https://datatracker.ietf.org/doc/html/rfc9114)), including QPACK ([RFC 9204](https://datatracker.ietf.org/doc/html/rfc9204)) and HTTP Datagrams ([RFC 9297](https://datatracker.ietf.org/doc/html/rfc9297)).
+```
+replace github.com/Psiphon-Labs/quic-go => github.com/goose-network/psiphon-quic-go@v0.0.0-<commit>
+```
 
-In addition to these base RFCs, it also implements the following RFCs:
+## Why
 
-* Unreliable Datagram Extension ([RFC 9221](https://datatracker.ietf.org/doc/html/rfc9221))
-* Datagram Packetization Layer Path MTU Discovery (DPLPMTUD, [RFC 8899](https://datatracker.ietf.org/doc/html/rfc8899))
-* QUIC Version 2 ([RFC 9369](https://datatracker.ietf.org/doc/html/rfc9369))
-* QUIC Event Logging using qlog ([draft-ietf-quic-qlog-main-schema](https://datatracker.ietf.org/doc/draft-ietf-quic-qlog-main-schema/) and [draft-ietf-quic-qlog-quic-events](https://datatracker.ietf.org/doc/draft-ietf-quic-qlog-quic-events/))
+Goose builds two QUIC stacks into one binary:
 
-Support for WebTransport over HTTP/3 ([draft-ietf-webtrans-http3](https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/)) is implemented in [webtransport-go](https://github.com/quic-go/webtransport-go).
+- **Psiphon** (via `psiphon-tunnel-core`), which imports
+  `Psiphon-Labs/quic-go` — whose `http3` package is hardwired to qpack
+  v0.4.0's decoder API;
+- **sing-box** (`-tags with_quic`: hysteria, hysteria2, TUIC), whose
+  `sagernet/quic-go` `http3` needs qpack v0.6.0.
 
-Detailed documentation can be found on [quic-go.net](https://quic-go.net/docs/).
+Go's minimal-version selection picks a single qpack version for the whole
+build. Pinning qpack at v0.4.0 (the only way upstream Psiphon quic-go
+compiles) breaks the sing-box QUIC protocols; selecting v0.6.0 breaks
+upstream Psiphon quic-go. Porting the five qpack decoder call sites here —
+all simple read-a-full-header-block-then-decode patterns, now funneled
+through one `decodeFull` helper — lets both stacks share qpack v0.6.0.
 
-## Projects using quic-go
+The upstream vendored build (`psiphon-tunnel-core`'s `vendor/`) is
+unaffected: it carries its own qpack copy and never resolves this module
+from the module graph.
 
-| Project                                                   | Description                                                                                                                                                       | Stars                                                                                               |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| [AdGuardHome](https://github.com/AdguardTeam/AdGuardHome) | Free and open source, powerful network-wide ads & trackers blocking DNS server.                                                                                   | ![GitHub Repo stars](https://img.shields.io/github/stars/AdguardTeam/AdGuardHome?style=flat-square) |
-| [algernon](https://github.com/xyproto/algernon)           | Small self-contained pure-Go web server with Lua, Markdown, HTTP/2, QUIC, Redis and PostgreSQL support                                                            | ![GitHub Repo stars](https://img.shields.io/github/stars/xyproto/algernon?style=flat-square)        |
-| [caddy](https://github.com/caddyserver/caddy/)            | Fast, multi-platform web server with automatic HTTPS                                                                                                              | ![GitHub Repo stars](https://img.shields.io/github/stars/caddyserver/caddy?style=flat-square)       |
-| [cloudflared](https://github.com/cloudflare/cloudflared)  | A tunneling daemon that proxies traffic from the Cloudflare network to your origins                                                                               | ![GitHub Repo stars](https://img.shields.io/github/stars/cloudflare/cloudflared?style=flat-square)  |
-| [frp](https://github.com/fatedier/frp)                    | A fast reverse proxy to help you expose a local server behind a NAT or firewall to the internet                                                                   | ![GitHub Repo stars](https://img.shields.io/github/stars/fatedier/frp?style=flat-square)            |
-| [go-libp2p](https://github.com/libp2p/go-libp2p)          | libp2p implementation in Go, powering [Kubo](https://github.com/ipfs/kubo) (IPFS) and [Lotus](https://github.com/filecoin-project/lotus) (Filecoin), among others | ![GitHub Repo stars](https://img.shields.io/github/stars/libp2p/go-libp2p?style=flat-square)     |
-| [gost](https://github.com/go-gost/gost)                   | A simple security tunnel written in Go                                                                                                                        | ![GitHub Repo stars](https://img.shields.io/github/stars/go-gost/gost?style=flat-square)            |
-| [Hysteria](https://github.com/apernet/hysteria)           | A powerful, lightning fast and censorship resistant proxy                                                                                                         | ![GitHub Repo stars](https://img.shields.io/github/stars/apernet/hysteria?style=flat-square)        |
-| [Mercure](https://github.com/dunglas/mercure)             | An open, easy, fast, reliable and battery-efficient solution for real-time communications                                                                         | ![GitHub Repo stars](https://img.shields.io/github/stars/dunglas/mercure?style=flat-square)         |
-| [OONI Probe](https://github.com/ooni/probe-cli)           | Next generation OONI Probe. Library and CLI tool.                                                                                                                 | ![GitHub Repo stars](https://img.shields.io/github/stars/ooni/probe-cli?style=flat-square)          |
-| [reverst](https://github.com/flipt-io/reverst)            | Reverse Tunnels in Go over HTTP/3 and QUIC                                                                                                                        | ![GitHub Repo stars](https://img.shields.io/github/stars/flipt-io/reverst?style=flat-square) |
-| [RoadRunner](https://github.com/roadrunner-server/roadrunner) | High-performance PHP application server, process manager written in Go and powered with plugins | ![GitHub Repo stars](https://img.shields.io/github/stars/roadrunner-server/roadrunner?style=flat-square) |
-| [syncthing](https://github.com/syncthing/syncthing/)      | Open Source Continuous File Synchronization                                                                                                                       | ![GitHub Repo stars](https://img.shields.io/github/stars/syncthing/syncthing?style=flat-square)     |
-| [traefik](https://github.com/traefik/traefik)             | The Cloud Native Application Proxy                                                                                                                                | ![GitHub Repo stars](https://img.shields.io/github/stars/traefik/traefik?style=flat-square)         |
-| [v2ray-core](https://github.com/v2fly/v2ray-core)         | A platform for building proxies to bypass network restrictions                                                                                                    | ![GitHub Repo stars](https://img.shields.io/github/stars/v2fly/v2ray-core?style=flat-square)        |
-| [YoMo](https://github.com/yomorun/yomo)                   | Streaming Serverless Framework for Geo-distributed System                                                                                                         | ![GitHub Repo stars](https://img.shields.io/github/stars/yomorun/yomo?style=flat-square)            |
+## Scope
 
-If you'd like to see your project added to this list, please send us a PR.
+- `http3/headers.go` — new `decodeFull` helper (iterate `DecodeFunc` until
+  `io.EOF`);
+- `http3/conn.go`, `http3/client.go`, `http3/http_stream.go`,
+  `http3/server.go` — `NewDecoder()` without the emit func, `decodeFull(...)`
+  instead of `DecodeFull(...)`;
+- `go.mod` — explicit `require github.com/quic-go/qpack v0.6.0` (upstream
+  declares none; it relies on vendoring), plus a full require list so the
+  module builds standalone.
 
-## Release Policy
+Everything else is byte-identical to the upstream import. Tests are dropped:
+they pin the old qpack API and are never executed in consumers' builds.
 
-quic-go always aims to support the latest two Go releases.
-
-## Contributing
-
-We are always happy to welcome new contributors! We have a number of self-contained issues that are suitable for first-time contributors, they are tagged with [help wanted](https://github.com/quic-go/quic-go/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22). If you have any questions, please feel free to reach out by opening an issue or leaving a comment.
+Upgrading to a newer upstream revision: re-import, re-apply the patch above
+(`git log -- http3/` shows exactly what changed), and `go mod tidy`.
